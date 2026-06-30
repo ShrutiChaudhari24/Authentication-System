@@ -1,5 +1,5 @@
 import mongoose, { model } from "mongoose";
-import { refreshToken } from "../controllers/auth.controller";
+import { refreshToken } from "../controllers/auth.controller.js";
 
 const sessionSchema = new mongoose.Schema({
     user:{

@@ -13,6 +13,11 @@ const authRouter = Router();
 authRouter.post("/register", authController.register); // yaha humne register api ka route define kiya hai aur uska implementation humne auth.controller.js mae kiya hai matlab rehgister controller ko use kar liya
 
 /*
+* POST / api/auth/login 
+*/
+authRouter.post("/login", authController.login); 
+
+/*
 * GET / api/auth/get-me  -> jis user kae liye token generate huya hai uss ki details hum fetch kar sakte hai
 */
 authRouter.get("/get-me",authController.getMe)
@@ -21,6 +26,17 @@ authRouter.get("/get-me",authController.getMe)
 * GET / api/auth/refresh-token 
 */
 authRouter.get("/refresh-token",authController.refreshToken)
+
+/*
+* GET / api/auth/logout 
+*/
+authRouter.get("/logout", authController.logout)
+
+/*
+* GET / api/auth/logout-all 
+*/
+authRouter.get("/logout-all", authController.logoutAll)
+
 
 
 export default authRouter;

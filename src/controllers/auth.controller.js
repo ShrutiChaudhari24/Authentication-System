@@ -4,6 +4,8 @@ import jwt from "jsonwebtoken";
 import config from "../config/config.js";
 import sessionModel from "../models/session.model.js";
 
+// ye sari hameri api's ban rahi hai
+
 export async function register(req,res) {
    
     const {username, email, password} = req.body;
@@ -49,7 +51,7 @@ export async function register(req,res) {
         ess liye hum 2 tarah kae token create karte hai access token and refresh token
     */
 
-     const refreshToken = jwt.sign({
+    const refreshToken = jwt.sign({
         id: user._id
     }, config.JWT_SECRET, {
         expiresIn: "7d"  // refresh token ka goal hota hai access token ko wapis sae generate karwana jab access token expire ho jaye ye thode long time kae liye valid ratha hai
@@ -58,7 +60,7 @@ export async function register(req,res) {
     const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex"); // refresh token ko phele hash mae convert karenge
 
     const session = await sessionModel.create({
-        userId: user._id,
+        user: user._id,
         refreshTokenHash, // fir ussey yaha store karenge
         ip: req.ip,
         userAgent: req.headers[ "user-agent" ]
@@ -90,6 +92,69 @@ export async function register(req,res) {
     })
 
     
+}
+
+export async function login(req,res) {
+    const { email, password } = req.body;
+
+    const user = await userModel.findOne({ email })
+
+    if(!user){
+        return res.status(401).json({
+            message: "Invalid email or password"
+        })
+    }
+
+    // password compare karna rahega
+    const hashedPassword = crypto.createHash("sha256").update(password).digest("hex");
+
+    const isPasswordValid = hashedPassword === user.password;
+
+    if(!isPasswordValid){
+        return res.status(401).json({
+            message: "Invalid email or password"
+        })
+    }
+
+    const refreshToken = jwt.sign({
+        id: user._id
+    }, config.JWT_SECRET,
+        {
+            expiresIn: "7d"
+        }
+    )
+
+    const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
+
+    const session = await sessionModel.create({
+        user: user._id,
+        refreshTokenHash,
+        ip: req.ip,
+        userAgent: req.headers[ "user-agent" ]
+    })
+
+    const accessToken = jwt.sign({
+        id: user._id,
+        sessionId: session._id
+    }, config.JWT_SECRET,{
+        expiresIn: "15m"
+    })
+
+    res.cookie("refreshToken", refreshToken,{
+        httpOnly: true,
+        secure: true,
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    })
+
+    res.status(200).json({
+        message: "Logged in sucessfully",
+        user:{
+            username: user.username,
+            email: user.email,
+        },
+        accessToken,
+    })
 }
 
 export async function getMe(req,res) {
@@ -131,6 +196,21 @@ export async function refreshToken(req,res) {
     // ager refresh token mil gaya tho hum access token generate karwa sakte hai
     const decoded = jwt.verify(refreshToken, config.JWT_SECRET)
 
+    // jab logout hone kae baad jab session revoked ho jayega tho jo hamera refreshtoken tha vo wapis sae use nahi hona chiye access token generate karne kae liye
+    // tho yaha access token generate hone sae phele ek aur check lagana hoga
+    const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
+
+    const session = await sessionModel.findOne({
+        refreshTokenHash,
+        revoked: false
+    })
+
+    if(!session){
+        return res.status(401).json({
+            message: "Invalid refresh token"
+        })
+    }
+
     const accessToken = jwt.sign({
         id: decoded.id
     }, config.JWT_SECRET,
@@ -146,6 +226,12 @@ export async function refreshToken(req,res) {
             expiresIn: "7d"
     })
 
+    // jab refresh token change hoga tho uss ka hash bhi humey database mae update karna pedega
+    const newRefreshTokenHash = crypto.createHash("sha256").update(newRefreshToken).digest("hex");
+
+    session.refreshTokenHash = newRefreshTokenHash;
+    await session.save();
+
     res.cookie("refreshToken",newRefreshToken,{
         httpOnly: true,
         secure: true,
@@ -156,5 +242,69 @@ export async function refreshToken(req,res) {
     res.status(200).json({
         message: "Access token refreshed sucessfully",
         accessToken
+    })
+}
+
+export async function logout(req,res) {
+    
+    const refreshToken = req.cookies.refreshToken; // logout kae liye subsae phele tho humey refresh token lagega tho vo humney nikala
+
+    // refresh token humney hash format mae save kiya tha hamere database mae tho wapis sae humey nikalne kae liye hash mae hi convert karna pedega
+
+    // ager refresh token nahi aaya hai tho
+    if(!refreshToken){
+        res.status(400).json({
+            message: "Refresh token not found"
+        })
+    }
+
+    // ager refresh token mil jata hai tho convert karenge hash mae
+    const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex"); 
+
+    const session = await sessionModel.findOne({
+        refreshTokenHash,
+        revoked: false
+    })
+
+    if (!session){
+        return res.status(400).json({
+            message: "Invalid refresh token"
+        })
+    }
+
+    // ager humey session mil gaya tho logout karne kae liye ussey revoke: true set karna hoga
+    session.revoked = true;
+    await session.save();
+
+    res.clearCookie("refreshToken")
+
+    res.status(200).json({
+        message: "Logged out successfully"
+    })
+
+}
+
+export async function logoutAll(req,res) {
+    const refreshToken = req.cookies.refreshToken;
+
+    if(!refreshToken){
+        return res.status(400).json({
+            message: "Refresh token no found"
+        })
+    }
+
+    const decoded = jwt.verify(refreshToken,config.JWT_SECRET)
+
+    await sessionModel.updateMany({
+        user: decoded.id,
+        revoked: false
+    },{
+        revoked: true
+    })
+
+    res.clearCookie("refreshToken")
+
+    res.status(200).json({
+        message: "Logged out from all devices sucessfully"
     })
 }
