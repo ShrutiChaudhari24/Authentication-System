@@ -14,6 +14,11 @@ const userSchema = new mongoose.Schema({
     password: {
         type: String,
         required: [true, "Password is required"]
+    },
+    // user jab create hota hai tho bydefault uss ka status verified: false ratha hai
+    verified: {
+        type: Boolean,
+        default: false
     }
 });
 

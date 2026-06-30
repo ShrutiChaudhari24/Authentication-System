@@ -3,6 +3,9 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import config from "../config/config.js";
 import sessionModel from "../models/session.model.js";
+import { sendEmail } from "../services/email.service.js";
+import { generateOtp, getOtpHtml } from "../utils/utils.js";
+import otpModel from "../models/otp.models.js";
 
 // ye sari hameri api's ban rahi hai
 
@@ -25,6 +28,7 @@ export async function register(req,res) {
     }
 
     const hashedPassword = crypto.createHash("sha256").update(password).digest("hex");
+    
     const newUser = new userModel({
         username,
         email,
@@ -50,7 +54,9 @@ export async function register(req,res) {
     
         ess liye hum 2 tarah kae token create karte hai access token and refresh token
     */
-
+    
+/* Ager hum OTP based verification kar rahe hai tho humey registration kae time pae hum accessToken ya RefreshToken generate nahi karwate matlab jab tak OTP based verification na ho jaye tab tak hum accessToken issue hi nahi karte
+    
     const refreshToken = jwt.sign({
         id: user._id
     }, config.JWT_SECRET, {
@@ -72,9 +78,7 @@ export async function register(req,res) {
     }, config.JWT_SECRET, {
         expiresIn: "15m" // access token generally 15 min mae expire ho jata hai ess ka main goal ratha hai konse user nae request ki hai ussey identify karna aur ye hamere normal token jesa hi ratha hai
     });
-
    
-
     res.cookie("refreshToken", refreshToken,{
         httpOnly: true,  // ess ka matlab hai client side pae jo js run hone wali hai vo kabhi bhi cookies kae ander jo data hai uss ko read nahi kar payegi
         secure: true,
@@ -82,13 +86,31 @@ export async function register(req,res) {
         maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     })
 
+*/
+
+/* Response send karne sae phele hum email send kar rahe honge */
+
+    const otp = generateOtp();
+    const html = getOtpHtml(otp);
+
+    const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+    await otpModel.create({
+        email,
+        user: user._id,
+        otpHash
+    })
+
+    await sendEmail(email, "OTP Verification", `Your OTP code is ${otp}`, html)
+
     res.status(201).json({
         message: "User registered successfully",
         user:{
             username: user.username,
-            email: user.email
+            email: user.email,
+            verified: user.verified,
         },
-        accessToken,  // accessToken memory mae save hone wala hai tho ussey response ki body mae bhajna jaruri hota lekin refresh token cilent side pae javaScript mae access na ho paye essliye hum ussey cookies mae store karte hai, cookies mae store karne kae liye ek package humey chiye
+        // OTP based verification ager hai tho access token bhi nahi jayega registration kae time
+        // accessToken,  // accessToken memory mae save hone wala hai tho ussey response ki body mae bhajna jaruri hota lekin refresh token cilent side pae javaScript mae access na ho paye essliye hum ussey cookies mae store karte hai, cookies mae store karne kae liye ek package humey chiye
     })
 
     
@@ -103,6 +125,13 @@ export async function login(req,res) {
         return res.status(401).json({
             message: "Invalid email or password"
         })
+    }
+
+    // jab tak user khud ka email verify nahi kar leta tab tak vo hamere resourses use nahi kar sakta
+    if(!user.verified){
+       return res.status(401).json({
+            message: "Email not verified"
+        }) 
     }
 
     // password compare karna rahega
@@ -308,3 +337,39 @@ export async function logoutAll(req,res) {
         message: "Logged out from all devices sucessfully"
     })
 }
+
+export async function verifyEmail(req, res) {
+    const { otp, email } = req.body
+
+    const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+
+    const otpDoc = await otpModel.findOne({
+        email,
+        otpHash
+    })
+
+    if (!otpDoc) {
+        return res.status(400).json({
+            message: "Invalid OTP"
+        })
+    }
+
+    const user = await userModel.findByIdAndUpdate(otpDoc.user, {
+        verified: true
+    })
+
+    await otpModel.deleteMany({
+        user: otpDoc.user
+    })
+
+    return res.status(200).json({
+        message: "Email verified successfully",
+        user: {
+            username: user.username,
+            email: user.email,
+            verified: user.verified
+        }
+    })
+}
+
+
